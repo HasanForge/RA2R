@@ -7,51 +7,43 @@ on:
 
 jobs:
   build-x86:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up MSYS2 (MinGW32 / i686)
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW32
-          update: true
-          install: >-
-            mingw-w64-i686-gcc
-            mingw-w64-i686-cmake
-            mingw-w64-i686-make
+      - name: Install i686 MinGW cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-i686 g++-mingw-w64-i686 cmake unzip
+          i686-w64-mingw32-g++ --version
 
       - name: Download SDL3 (i686 mingw devel package)
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download --repo libsdl-org/SDL --pattern "SDL3-devel-3.4*-mingw.zip" -D sdl3dl
-          Expand-Archive -Path sdl3dl\*.zip -DestinationPath sdl3
+          mkdir sdl3
+          unzip -q sdl3dl/*.zip -d sdl3
+          echo "SDL3_PREFIX=$(find sdl3 -maxdepth 2 -type d -name 'i686-w64-mingw32')" >> "$GITHUB_ENV"
 
-      - name: Locate SDL3 i686 prefix
-        id: sdl
-        shell: pwsh
+      - name: Configure (i686 cross-compile)
         run: |
-          $p = Get-ChildItem -Recurse -Directory -Filter "i686-w64-mingw32" sdl3 | Select-Object -First 1
-          "prefix=$($p.FullName -replace '\\','/')" >> $env:GITHUB_OUTPUT
-
-      - name: Configure (i686)
-        shell: msys2 {0}
-        run: cmake -B build -G "MinGW Makefiles" -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
+          cmake -B build -G "Unix Makefiles" \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc \
+            -DCMAKE_CXX_COMPILER=i686-w64-mingw32-g++ \
+            -DCMAKE_RC_COMPILER=i686-w64-mingw32-windres \
+            -DCMAKE_PREFIX_PATH="$SDL3_PREFIX"
 
       - name: Build
-        shell: msys2 {0}
         run: cmake --build build -j
 
       - name: Stage SDL3.dll next to the binaries
-        shell: pwsh
-        run: Copy-Item "${{ steps.sdl.outputs.prefix }}\bin\SDL3.dll" build\tools\
+        run: cp "$SDL3_PREFIX/bin/SDL3.dll" build/tools/
 
       - name: Upload build output
         uses: actions/upload-artifact@v4
         with:
           name: RA2R-x86
           path: build/tools/
-          
